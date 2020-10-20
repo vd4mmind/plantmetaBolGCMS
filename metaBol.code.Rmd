@@ -1,0 +1,225 @@
+---
+title: "metaBol.vdas"
+author: "vdas"
+date: "9/28/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r env}
+library(MultiAssayExperiment)
+library(CellBench)
+library(edgeR)
+library(limma)
+library(DESeq2)
+library(scater)
+```
+```{ r metabolomicsPackages}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("yamss")
+BiocManager::install("mtbls2")
+install.packages("NormalizeMets")
+BiocManager::install("impute")
+BiocManager::install("pcaMethods")
+BiocManager::install("xcms")
+BiocManager::install("MSnbase")
+BiocManager::install(c("msdata","png"))
+BiocManager::install("metaMS")
+install.packages("textshape")
+BiocManager::install("Glimma")
+install.packages("FactoMineR")
+install.packages("gplots")
+library("FactoMineR")
+library("devtools")
+install_github("kassambara/factoextra")
+install.packages("pheatmap")
+library("factoextra")
+library(yamss)
+library(mtbls2)
+library(impute)
+library(pcaMethods)
+library(NormalizeMets)
+library(xcms)
+library(magrittr)
+library(MSnbase)
+library(metaMS)
+library(textshape)
+library(pheatmap)
+library(Glimma)
+library(dplyr)
+library(gplots)
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r dataUpload}
+rawData=read.csv("/Users/vivekdas/Desktop/metaBolana_vdas/data/data_original_raw.csv")
+normData=read.csv("/Users/vivekdas/Desktop/metaBolana_vdas/data/data_normalized.csv")
+```
+
+```{r dataPrep}
+samplesName=rawData$Samples
+timePoints=rawData$Label
+rawData.2=as.data.frame(t(rawData))
+names(rawData.2) <- as.matrix(rawData.2[1, ])
+rawData.2 <- rawData.2[-1, ]
+rawData.2[] <- lapply(rawData.2, function(x) type.convert(as.character(x)))
+rawData.2 <- rawData.2[-1, ]
+head(rawData.2)
+normData.2=as.data.frame(t(normData))
+names(normData.2) <- as.matrix(normData.2[1, ])
+normData.2 <- normData.2[-1, ]
+normData.2[] <- lapply(normData.2, function(x) type.convert(as.character(x)))
+head(normData.2)
+normData.2 <- normData.2[-1, ]
+df.normData.label=normData[,1:2]
+df2 <- mutate_all(normData.2, function(x) as.numeric(as.character(x)))
+```
+## Including Plots
+```{r exploreData}
+#MDS plot on the data
+glMDSPlot(df2, groups=df.normData.label)
+#PCA plot on the data
+df2.pca <- PCA(t(df2), graph = FALSE)
+fviz(df2.pca, "ind",labelsize = 2)
+fviz(df2.pca, "var",labelsize = 3 )
+df2.pca.plot=fviz_pca_ind(df2.pca,  label="none", habillage=df.normData.label$Label)
+#sample dist correlation heatmap
+sample.dist.corr= pheatmap(cor(df2))
+```
+## Adding the timeInfo
+```{r batchInfo}
+sampleName.norm=normData[,1:2]
+write.table(sampleName.norm, file = "/Users/vivekdas/Desktop/metaBolana_vdas/data/batchInfo.txt", sep = "\t",row.names=F)
+batchInfo=read.table("/Users/vivekdas/Desktop/metaBolana_vdas/data/batchInfo2.txt",sep="\t",header = TRUE)
+df.normData.label.v2=merge(df.normData.label,batchInfo, by="Samples",all=TRUE)
+MDS1.all= glMDSPlot(df2, groups=df.normData.label.v2,folder="glimma-batch.all")
+
+#### adding MDS via ggplot2
+sampleDist.all=dist(t(df2))
+sampleDist.all.mat=as.matrix(sampleDist.all)
+mdsData.all=data.frame(cmdscale(sampleDist.all.mat))
+dim(mdsData.all)
+mdsData.all2<-(cbind(mdsData.all,colnames(df2)))
+dim(mdsData.all2)
+
+##plot
+ggplot(mdsData.all2, aes(X1,X2, color=df.normData.label.v2$Label.x)) + scale_shape_manual(values=1:nlevels(df.normData.label.v2$Label.x)) + geom_point(size=3) + stat_ellipse()
+
+## ggbiplot 
+library(ggbiplot)
+PCA.all <- prcomp(t(df2), center = TRUE,scale. = TRUE)
+summary(PCA.all)
+ggbiplot(PCA.all,ellipse=TRUE,obs.scale = 1, var.scale = 1,var.axes=FALSE,   labels=NULL, groups=df.normData.label.v2$Label.x, ellipse.prob = 0.95) + ggtitle("PCA of all samples having Control and Treatment Groups")+ theme(legend.position = "right") + geom_point(aes(colour=df.normData.label.v2$Label.x), size = 2.5)
+##chose for the paper
+
+
+library(tidyverse)
+control.batch=df.normData.label.v2 %>%
+    filter(str_detect(Samples, 'Time0|TIME0|-KNO3-'))
+treated.batch=df.normData.label.v2 %>%
+    filter(str_detect(Samples, 'Time0|TIME0|-UKNO3-'))
+data.control.batch<-df2 %>% select(one_of(dput(as.character(control.batch$Samples))))
+data.treated.batch<-df2 %>% select(one_of(dput(as.character(treated.batch$Samples))))
+ctrl.label<- droplevels(control.batch$Label.x)
+tmt.label<- droplevels(treated.batch$Label.x)
+```
+
+### New Diagnostics Plots
+```{r MDS_PCA_plots}
+MDS.control= glMDSPlot(data.control.batch, groups=control.batch,folder="glimma-batch.control")
+MDS.treated= glMDSPlot(data.treated.batch, groups=treated.batch,folder="glimma-batch.treated")
+
+#PCA plot on the data on control and treated separetely
+control.pca <- PCA(t(data.control.batch), graph = FALSE)
+control.pca.plot=fviz_pca_ind(control.pca,  label="none", habillage=ctrl.label)
+fviz_pca_ind(control.pca, habillage=ctrl.label, labelsize=2)
+fviz(control.pca, "ind",labelsize = 2)
+fviz(control.pca, "var",labelsize = 3 )
+fviz_pca_biplot(control.pca, geom=c("point", "text", "arrows"), 
+                label = "ind", 
+                alpha.var ="contrib", col.var="contrib",
+                repel=TRUE, gradient.cols = "npg") 
+
+
+#### PCA ggbiplot for the control group
+
+PCA.control<- prcomp(t(data.control.batch), center = TRUE,scale. = TRUE)
+summary(PCA.control)
+ggbiplot(PCA.control,choices = 1:2, ellipse=TRUE,obs.scale = 1, var.scale = 1,var.axes=FALSE,   labels=NULL, groups=control.batch$Label.x, ellipse.prob = 0.95) + ggtitle("PCA of samples having Control Group")+ theme(legend.position = "right") + geom_point(aes(colour=control.batch$Label.x), size = 2)
+
+
+
+treated.pca <- PCA(t(data.treated.batch), graph = FALSE)
+treated.pca.plot=fviz_pca_ind(treated.pca,  label="none", habillage=tmt.label)
+fviz_pca_ind(treated.pca, habillage=tmt.label,labelsize=2,repel=T)
+fviz(treated.pca, "ind",labelsize = 2)
+fviz(treated.pca, "var",labelsize = 3 )
+fviz_pca_biplot(treated.pca, geom=c("point", "text", "arrows"), 
+                label = "ind", 
+                alpha.var ="contrib", col.var="contrib",
+                repel=TRUE, gradient.cols = "npg") 
+
+#### PCA ggbiplot for the treatment group
+
+PCA.treated<- prcomp(t(data.treated.batch), center = TRUE,scale. = TRUE)
+summary(PCA.treated)
+ggbiplot(PCA.treated,choices = 1:2, ellipse=TRUE,obs.scale = 1, var.scale = 1,var.axes=FALSE,   labels=NULL, groups=treated.batch$Label.x, ellipse.prob = 0.95) + ggtitle("PCA of samples having Treatment Group")+ theme(legend.position = "right") + geom_point(aes(colour=treated.batch$Label.x), size = 2)
+
+```
+
+```{r plotANOVAres}
+ANOVA_res_23=read.table("/Users/vivekdas/Desktop/metaBolana_vdas/data/ANOVA_metabolites_bbm_v3.txt",sep="\t",header = T, row.names =1 )
+#ANOVA_res_23.ann=as.data.frame(t(ANOVA_res_23[1:2,]))
+ANOVA_res_23.ann=read.table("/Users/vivekdas/Desktop/metaBolana_vdas/data/batchInfo3.txt",sep="\t",header = T, row.names=1 )
+colnames(ANOVA_res_23) <- c("Time0-R2","TIME0-R3","TIME0-R4","TIME0-R5","6H-KNO3-R1","6H-KNO3-R2","6H-KNO3-R3","6H-KNO3-R4","6H-KNO3-R5","6H-UKNO3-R1","6H-UKNO3-R2","6H-UKNO3-R3","6H-UKNO3-R4","6H-UKNO3-R5","12H-KNO3-R1","12H-KNO3-R2","12H-KNO3-R3","12H-KNO3-R4","12H-KNO3-R5","12H-UKNO3-R1","12H-UKNO3-R2","12H-UKNO3-R3","12H-UKNO3-R4","12H-UKNO3-R5","24H-KNO3-R1","24H-KNO3-R2","24H-KNO3-R3","24H-KNO3-R4","24H-KNO3-R5","24H-UKNO3-R2","24H-UKNO3-R3","24H-UKNO3-R4","24H-UKNO3-R5","48H-KNO3-R1","48H-KNO3-R2","48H-KNO3-R3","48H-KNO3-R4","48H-KNO3-R5","48H-UKNO3-R1","48H-UKNO3-R3","48H-UKNO3-R4","48H-UKNO3-R5","48H-UKNO3-R2","96H-KNO3-R1","96H-KNO3-R2","96H-KNO3-R3","96H-KNO3-R4","96H-KNO3-R5","96H-UKNO3-R3","96H-UKNO3-R1","96H-UKNO3-R2","96H-UKNO3-R4","96H-UKNO3-R5")
+library(RColorBrewer)
+library(gplots)
+col=colorpanel(2000, low="blue",mid="white",high="red")
+pheatmap(log10(ANOVA_res_23),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+# 0 vs 6H + U
+pheatmap(log10(ANOVA_res_23[,c(1:4,10:14)]),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+# 0 vs 12H + U
+pheatmap(log10(ANOVA_res_23[,c(1:4,20:24)]),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+
+# 0 vs 24H + U
+pheatmap(log10(ANOVA_res_23[,c(1:4,30:33)]),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+
+# 0 vs 48H + U
+pheatmap(log10(ANOVA_res_23[,c(1:4,39:43)]),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+
+# 0 vs 96H + U
+pheatmap(log10(ANOVA_res_23[,c(1:4,49:53)]),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+
+# treatment effects at specific time points
+# 6H vs 6H + U
+pheatmap(log10(ANOVA_res_23[,c(5:9,10:14)]),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+# 12H vs 12H + U
+pheatmap(log10(ANOVA_res_23[,c(15:19,20:24)]),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+
+# 24H vs 24H + U
+pheatmap(log10(ANOVA_res_23[,c(25:29,30:33)]),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+
+# 48H vs 48H + U
+pheatmap(log10(ANOVA_res_23[,c(34:38,39:43)]),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+
+# 96H vs 96H + U
+pheatmap(log10(ANOVA_res_23[,c(44:48,49:53)]),scale="row",clustering_distance_cols= "correlation",show_rownames= T,show_colnames=F,color=col,cluster_col=F,annotation_col=ANOVA_res_23.ann)
+```
+
+```{saveWorkspace}
+## Saving the workspace 
+save.image(file = "/Users/vivekdas/Desktop/metaBolana_vdas/data/metaBolanalysis.RData")
+## load the workspace
+load("/Users/vivekdas/Desktop/metaBolana_vdas/data/metaBolanalysis.RData")
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
